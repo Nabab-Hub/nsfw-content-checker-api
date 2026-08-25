@@ -1,0 +1,7 @@
+services:
+  nudenet:
+    build: .
+    container_name: nudenet-api
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

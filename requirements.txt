@@ -1,0 +1,3 @@
+fastapi
+uvicorn[standard]
+nudenet>=3.4.2
