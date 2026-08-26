@@ -23,7 +23,7 @@ from nudenet import NudeDetector
 
 FIREBASE_CREDENTIALS = os.getenv(
     "FIREBASE_CREDENTIALS",
-    "/etc/secrets/firebase-service-account.json",
+    "/etc/secrets/nude-checker-firebase-adminsdk.json",
 )
 
 if not os.path.exists(FIREBASE_CREDENTIALS):
