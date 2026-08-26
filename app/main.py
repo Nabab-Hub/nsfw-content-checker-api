@@ -21,9 +21,13 @@ from nudenet import NudeDetector
 # Firebase
 # ============================================================
 
+# FIREBASE_CREDENTIALS = os.getenv(
+#     "FIREBASE_CREDENTIALS",
+#     "/etc/secrets/firebase-service-account.json",
+# )
 FIREBASE_CREDENTIALS = os.getenv(
     "FIREBASE_CREDENTIALS",
-    "/etc/secrets/nude-checker-firebase-adminsdk.json",
+    "nude-checker-firebase-adminsdk.json",
 )
 
 if not os.path.exists(FIREBASE_CREDENTIALS):
@@ -177,27 +181,23 @@ def verify_api_key(
     api_key: Optional[str] = Depends(api_key_header),
 ):
     """
-    Validate the API key against:
-
-        apiKeys/{keyHash}
-
+    Validate the API key against Firestore collection `apiKeys`.
+    
     Firestore schema:
-
-        keyHash
-        keyPrefix
-        userId
-        plan
-        createdAt
-        expiresAt
-        monthlyLimit
-        requestCount
-        status
+        keyHash (string) - SHA-256 hash of the raw API key
+        keyPrefix (string)
+        userId (string)
+        plan (string)
+        createdAt (number/timestamp)
+        expiresAt (number/timestamp or null)
+        monthlyLimit (number)
+        requestCount (number)
+        status (string: 'active' | 'revoked' | 'expired')
     """
 
     # --------------------------------------------------------
     # Missing key
     # --------------------------------------------------------
-
     if not api_key:
         raise HTTPException(
             status_code=401,
@@ -211,44 +211,46 @@ def verify_api_key(
     # --------------------------------------------------------
     # Hash supplied key
     # --------------------------------------------------------
-
-    key_hash = hash_api_key(api_key)
+    key_hash = hash_api_key(api_key.strip())
 
     # --------------------------------------------------------
-    # Direct Firestore document lookup
-    #
-    # Recommended structure:
-    #
-    # apiKeys/{keyHash}
-    #
-    # If your current document ID is different, see the note
-    # below the code.
+    # Firestore lookup:
+    # 1. Query `apiKeys` where `keyHash == key_hash`
+    # 2. Fallback to direct document lookup if doc ID is key_hash
     # --------------------------------------------------------
-
-    key_ref = (
+    query = (
         db.collection("apiKeys")
-        .document(key_hash)
+        .where(filter=firestore.FieldFilter("keyHash", "==", key_hash))
+        .limit(1)
+        .stream()
     )
+    docs = list(query)
 
-    key_snapshot = key_ref.get()
-
-    if not key_snapshot.exists:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "success": False,
-                "error": "invalid_api_key",
-                "message": "Invalid API key",
-            },
-        )
-
-    key_data = key_snapshot.to_dict()
+    if docs:
+        key_doc = docs[0]
+        key_ref = key_doc.reference
+        key_data = key_doc.to_dict() or {}
+    else:
+        # Fallback: check if doc ID is key_hash
+        fallback_ref = db.collection("apiKeys").document(key_hash)
+        fallback_snap = fallback_ref.get()
+        if not fallback_snap.exists:
+            raise HTTPException(
+                status_code=401,
+                detail={
+                    "success": False,
+                    "error": "invalid_api_key",
+                    "message": "Invalid API key",
+                },
+            )
+        key_doc = fallback_snap
+        key_ref = fallback_ref
+        key_data = fallback_snap.to_dict() or {}
 
     # --------------------------------------------------------
     # Status
     # --------------------------------------------------------
-
-    status = key_data.get("status")
+    status = key_data.get("status", "active")
 
     if status != "active":
         raise HTTPException(
@@ -256,68 +258,46 @@ def verify_api_key(
             detail={
                 "success": False,
                 "error": "api_key_inactive",
-                "message": "API key is not active",
+                "message": f"API key is not active (status: {status})",
             },
         )
 
     # --------------------------------------------------------
-    # Expiration
-    #
-    # Your expiresAt is Unix milliseconds.
-    #
-    # Example:
-    #
-    # 1790310193165
+    # Expiration (Unix milliseconds)
     # --------------------------------------------------------
-
     expires_at = key_data.get("expiresAt")
 
-    if expires_at is None:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "success": False,
-                "error": "invalid_api_key",
-                "message": "API key has no expiration date",
-            },
-        )
+    if expires_at is not None:
+        try:
+            if hasattr(expires_at, "timestamp"):
+                expires_at_ms = int(expires_at.timestamp() * 1000)
+            elif isinstance(expires_at, (int, float)):
+                expires_at_ms = int(expires_at)
+            elif isinstance(expires_at, str) and expires_at.isdigit():
+                expires_at_ms = int(expires_at)
+            else:
+                expires_at_ms = None
 
-    try:
-        expires_at = int(expires_at)
-
-    except (TypeError, ValueError):
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error": "invalid_api_key_configuration",
-                "message": "Invalid API key expiration",
-            },
-        )
-
-    now_ms = current_timestamp_ms()
-
-    if expires_at <= now_ms:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "success": False,
-                "error": "api_key_expired",
-                "message": "API key has expired",
-            },
-        )
+            now_ms = current_timestamp_ms()
+            if expires_at_ms is not None and expires_at_ms <= now_ms:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "success": False,
+                        "error": "api_key_expired",
+                        "message": "API key has expired",
+                    },
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            pass
 
     # --------------------------------------------------------
     # Monthly usage
     # --------------------------------------------------------
-
-    request_count = int(
-        key_data.get("requestCount", 0)
-    )
-
-    monthly_limit = int(
-        key_data.get("monthlyLimit", 0)
-    )
+    request_count = int(key_data.get("requestCount", 0))
+    monthly_limit = int(key_data.get("monthlyLimit", 0))
 
     if monthly_limit > 0 and request_count >= monthly_limit:
         raise HTTPException(
@@ -332,10 +312,10 @@ def verify_api_key(
     # --------------------------------------------------------
     # Return authenticated API-key information
     # --------------------------------------------------------
-
     return {
-        "key_hash": key_hash,
+        "key_id": key_doc.id,
         "key_ref": key_ref,
+        "key_hash": key_hash,
         "user_id": key_data.get("userId"),
         "plan": key_data.get("plan"),
         "key_prefix": key_data.get("keyPrefix"),
@@ -348,7 +328,7 @@ def verify_api_key(
 
 
 # ============================================================
-# Usage counter
+# Usage counter & logs
 # ============================================================
 
 @firestore.transactional
@@ -358,17 +338,7 @@ def increment_usage_transaction(
 ):
     """
     Atomically increment requestCount.
-
-    This prevents:
-
-        request A reads 100
-        request B reads 100
-        request A writes 101
-        request B writes 101
-
-    which would incorrectly count 2 requests as 1.
     """
-
     snapshot = key_ref.get(
         transaction=transaction
     )
@@ -378,25 +348,11 @@ def increment_usage_transaction(
             "API key disappeared during request"
         )
 
-    data = snapshot.to_dict()
+    data = snapshot.to_dict() or {}
+    current_count = int(data.get("requestCount", 0))
+    monthly_limit = int(data.get("monthlyLimit", 0))
 
-    current_count = int(
-        data.get("requestCount", 0)
-    )
-
-    monthly_limit = int(
-        data.get("monthlyLimit", 0)
-    )
-
-    # Check the limit AGAIN inside the transaction.
-    #
-    # This is important because another request could have
-    # consumed the final available request between the
-    # initial authentication check and this transaction.
-    if (
-        monthly_limit > 0
-        and current_count >= monthly_limit
-    ):
+    if monthly_limit > 0 and current_count >= monthly_limit:
         raise RuntimeError(
             "MONTHLY_LIMIT_REACHED"
         )
@@ -411,19 +367,15 @@ def increment_usage_transaction(
 
 def increment_usage(key_ref):
     """
-    Execute the Firestore transaction.
+    Execute the Firestore transaction to increment request count.
     """
-
     transaction = db.transaction()
-
     try:
         increment_usage_transaction(
             transaction,
             key_ref,
         )
-
     except RuntimeError as exc:
-
         if str(exc) == "MONTHLY_LIMIT_REACHED":
             raise HTTPException(
                 status_code=429,
@@ -433,8 +385,28 @@ def increment_usage(key_ref):
                     "message": "Monthly API request limit reached",
                 },
             )
-
         raise
+
+
+def log_usage(
+    user_id: Optional[str],
+    key_id: Optional[str],
+    endpoint: str = "/is_safe",
+    status_code: int = 200,
+):
+    """
+    Log usage entry to `usageLogs` collection matching the dashboard schema.
+    """
+    try:
+        db.collection("usageLogs").add({
+            "userId": user_id or "",
+            "keyId": key_id or "",
+            "timestamp": current_timestamp_ms(),
+            "endpoint": endpoint,
+            "statusCode": status_code,
+        })
+    except Exception as exc:
+        print(f"Failed to write usage log: {exc}")
 
 
 # ============================================================
@@ -569,6 +541,13 @@ def is_safe(
 
         increment_usage(
             api_key["key_ref"]
+        )
+
+        log_usage(
+            user_id=api_key.get("user_id"),
+            key_id=api_key.get("key_id"),
+            endpoint="/is_safe",
+            status_code=200,
         )
 
         # ----------------------------------------------------
