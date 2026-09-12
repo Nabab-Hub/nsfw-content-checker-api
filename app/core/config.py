@@ -3,6 +3,10 @@ import os
 # Candidate default paths for Firebase service account credentials
 DEFAULT_CREDENTIAL_PATHS = [
     os.getenv("FIREBASE_CREDENTIALS"),
+    "cyliumos-firebase-adminsdk.json",
+    os.path.join(os.path.dirname(__file__), "..", "..", "cyliumos-firebase-adminsdk.json"),
+    os.path.join(os.getcwd(), "cyliumos-firebase-adminsdk.json"),
+    os.path.join(os.getcwd(), "ai-models", "nsfw-content-checker-api", "cyliumos-firebase-adminsdk.json"),
     "/etc/secrets/firebase-service-account.json",
     "nude-checker-firebase-adminsdk.json",
     "firebase-service-account.json",
