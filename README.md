@@ -122,10 +122,10 @@ Or build and run manually:
 
 ```bash
 docker build -t nsfw-checker-api .
-docker run -p 8080:8080 -v /path/to/firebase-key.json:/etc/secrets/firebase-service-account.json nsfw-checker-api
+docker run -p 8001:8001 -v /path/to/firebase-key.json:/etc/secrets/firebase-service-account.json nsfw-checker-api
 ```
 
-The API will be available at `http://localhost:8080`.
+The API will be available at `http://localhost:8001`.
 
 ---
 
@@ -147,12 +147,12 @@ The API will be available at `http://localhost:8080`.
 
 3. Run the development server:
    ```bash
-   uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+   uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
    ```
 
 4. Open API documentation in your browser:
-   - Interactive Swagger UI: `http://localhost:8080/docs`
-   - ReDoc: `http://localhost:8080/redoc`
+   - Interactive Swagger UI: `http://localhost:8001/docs`
+   - ReDoc: `http://localhost:8001/redoc`
 
 ---
 
@@ -309,7 +309,7 @@ Control whether coordinate rectangles for detections are returned in the respons
 
 #### 1. Standard Check (Default options)
 ```bash
-curl -X POST "http://localhost:8080/is_safe" \
+curl -X POST "http://localhost:8001/is_safe" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: nsk_live_xxxxxxxxxxxxxxxxxxxxxxxx" \
   -d '{
@@ -319,7 +319,7 @@ curl -X POST "http://localhost:8080/is_safe" \
 
 #### 2. Half-Nudity Enabled with Detection Coordinates
 ```bash
-curl -X POST "http://localhost:8080/is_safe" \
+curl -X POST "http://localhost:8001/is_safe" \
   -H "Content-Type: application/json" \
   -H "X-API-Key: nsk_live_xxxxxxxxxxxxxxxxxxxxxxxx" \
   -d '{
@@ -335,7 +335,7 @@ curl -X POST "http://localhost:8080/is_safe" \
 
 ```typescript
 async function checkImageSafety(base64Image: string, apiKey: string) {
-  const response = await fetch("http://localhost:8080/is_safe", {
+  const response = await fetch("http://localhost:8001/is_safe", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -374,7 +374,7 @@ async function checkImageSafety(base64Image: string, apiKey: string) {
 import base64
 import requests
 
-API_URL = "http://localhost:8080/is_safe"
+API_URL = "http://localhost:8001/is_safe"
 API_KEY = "nsk_live_xxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Convert local image file to base64
@@ -493,4 +493,35 @@ When an error occurs, the API returns a standard HTTP status code and a descript
     "message": "Invalid base64 image"
   }
 }
+```
+
+---
+
+## 🧪 Testing & Verification
+
+### 1. Test Health & Engine Readiness
+```bash
+curl -X GET "http://localhost:8001/health"
+```
+
+Expected Response:
+```json
+{
+  "status": "healthy",
+  "version": "1.0.0",
+  "nudenet_loaded": true,
+  "firebase_connected": true
+}
+```
+
+### 2. Test Detection Endpoint with Valid API Key
+```bash
+curl -X POST "http://localhost:8001/is_safe" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: nsk_live_x9z0abcdef1234567890" \
+  -d '{
+    "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+    "half_nudity": "enabled",
+    "detection_point": true
+  }'
 ```

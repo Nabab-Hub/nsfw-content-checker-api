@@ -142,11 +142,90 @@ def verify_api_key(
             },
         )
 
+    # --------------------------------------------------------
+    # Service Entitlement / Subscription Verification
+    # A universal key is valid only for services the user subscribed to.
+    # --------------------------------------------------------
+    user_id = key_data.get("userId")
+    SERVICE_ID = "nsfw-detection"
+    is_authorized = False
+
+    if user_id:
+        # 1. Check if user is platform admin
+        try:
+            user_snap = db.collection("users").document(user_id).get()
+            if user_snap.exists and (user_snap.to_dict() or {}).get("role") == "admin":
+                is_authorized = True
+        except Exception:
+            pass
+
+        # 2. Check admin override
+        if not is_authorized:
+            try:
+                override_snap = db.collection("userAccessOverrides").document(f"{user_id}_{SERVICE_ID}").get()
+                if override_snap.exists:
+                    granted = (override_snap.to_dict() or {}).get("granted")
+                    if granted is False:
+                        raise HTTPException(
+                            status_code=403,
+                            detail={
+                                "success": False,
+                                "error": "service_access_revoked",
+                                "message": f"Access to '{SERVICE_ID}' has been revoked by an administrator.",
+                            },
+                        )
+                    if granted is True:
+                        is_authorized = True
+            except HTTPException:
+                raise
+            except Exception:
+                pass
+
+        # 3. Check active subscriptions in Firestore
+        if not is_authorized:
+            try:
+                now_ms = current_timestamp_ms()
+                subs = (
+                    db.collection("subscriptions")
+                    .where(filter=firestore.FieldFilter("userId", "==", user_id))
+                    .where(filter=firestore.FieldFilter("status", "in", ["active", "pending"]))
+                    .stream()
+                )
+                for s in subs:
+                    sdata = s.to_dict() or {}
+                    period_end = sdata.get("currentPeriodEnd", 0)
+                    if period_end > now_ms:
+                        sub_svc = sdata.get("serviceId", "")
+                        if sub_svc in [SERVICE_ID, "all"]:
+                            is_authorized = True
+                            break
+                        # Check bundle plan
+                        plan_id = sdata.get("planId")
+                        if plan_id:
+                            plan_doc = db.collection("plans").document(plan_id).get()
+                            if plan_doc.exists:
+                                allowed_svcs = (plan_doc.to_dict() or {}).get("allowedServiceIds", [])
+                                if "*" in allowed_svcs or "all" in allowed_svcs or SERVICE_ID in allowed_svcs:
+                                    is_authorized = True
+                                    break
+            except Exception:
+                pass
+
+        if not is_authorized:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "success": False,
+                    "error": "service_not_subscribed",
+                    "message": f"Access Denied: Your account does not have an active subscription for '{SERVICE_ID}'. Please subscribe to this service in your CyliumOS dashboard to unlock access.",
+                },
+            )
+
     return {
         "key_id": key_doc.id,
         "key_ref": key_ref,
         "key_hash": key_hash,
-        "user_id": key_data.get("userId"),
+        "user_id": user_id,
         "plan": key_data.get("plan"),
         "key_prefix": key_data.get("keyPrefix"),
         "created_at": key_data.get("createdAt"),
@@ -155,3 +234,4 @@ def verify_api_key(
         "request_count": request_count,
         "status": status,
     }
+
