@@ -8,7 +8,7 @@ def hash_api_key(api_key: str) -> str:
     Convert raw API key into SHA-256 hex string for database lookup.
 
     Example:
-        nsk_live_xxxxxxxxx -> 8cd2c46e0ea3827...
+        cyk_live_xxxxxxxxx -> 8cd2c46e0ea3827...
     """
     return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
 

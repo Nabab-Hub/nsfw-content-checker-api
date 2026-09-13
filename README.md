@@ -161,7 +161,7 @@ The API will be available at `http://localhost:8001`.
 All detection requests to `/is_safe` require an API key passed via the **`X-API-Key`** HTTP header:
 
 ```http
-X-API-Key: nsk_live_xxxxxxxxxxxxxxxxxxxxxxxx
+X-API-Key: cyk_live_xxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 ---
@@ -311,7 +311,7 @@ Control whether coordinate rectangles for detections are returned in the respons
 ```bash
 curl -X POST "http://localhost:8001/is_safe" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: nsk_live_xxxxxxxxxxxxxxxxxxxxxxxx" \
+  -H "X-API-Key: cyk_live_xxxxxxxxxxxxxxxxxxxxxxxx" \
   -d '{
     "image": "/9j/4AAQSkZJRgABAQEASABIAAD..."
   }'
@@ -321,7 +321,7 @@ curl -X POST "http://localhost:8001/is_safe" \
 ```bash
 curl -X POST "http://localhost:8001/is_safe" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: nsk_live_xxxxxxxxxxxxxxxxxxxxxxxx" \
+  -H "X-API-Key: cyk_live_xxxxxxxxxxxxxxxxxxxxxxxx" \
   -d '{
     "image": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD...",
     "half_nudity": "enabled",
@@ -375,7 +375,7 @@ import base64
 import requests
 
 API_URL = "http://localhost:8001/is_safe"
-API_KEY = "nsk_live_xxxxxxxxxxxxxxxxxxxxxxxx"
+API_KEY = "cyk_live_xxxxxxxxxxxxxxxxxxxxxxxx"
 
 # Convert local image file to base64
 with open("sample.jpg", "rb") as f:
@@ -518,7 +518,7 @@ Expected Response:
 ```bash
 curl -X POST "http://localhost:8001/is_safe" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: nsk_live_x9z0abcdef1234567890" \
+  -H "X-API-Key: cyk_live_x9z0abcdef1234567890" \
   -d '{
     "image": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
     "half_nudity": "enabled",
