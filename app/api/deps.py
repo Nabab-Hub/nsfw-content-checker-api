@@ -166,14 +166,49 @@ def verify_api_key(
                 if override_snap.exists:
                     granted = (override_snap.to_dict() or {}).get("granted")
                     if granted is False:
-                        raise HTTPException(
-                            status_code=403,
-                            detail={
-                                "success": False,
-                                "error": "service_access_revoked",
-                                "message": f"Access to '{SERVICE_ID}' has been revoked by an administrator.",
-                            },
-                        )
+                        # Check if user has an active subscription that supersedes this revocation
+                        has_active_sub = False
+                        try:
+                            now_ms = current_timestamp_ms()
+                            subs = (
+                                db.collection("subscriptions")
+                                .where(filter=firestore.FieldFilter("userId", "==", user_id))
+                                .where(filter=firestore.FieldFilter("status", "in", ["active", "pending"]))
+                                .stream()
+                            )
+                            for s in subs:
+                                sdata = s.to_dict() or {}
+                                if sdata.get("currentPeriodEnd", 0) > now_ms:
+                                    sub_svc = sdata.get("serviceId", "")
+                                    if sub_svc in [SERVICE_ID, "all"]:
+                                        has_active_sub = True
+                                        break
+                                    plan_id = sdata.get("planId")
+                                    if plan_id:
+                                        plan_doc = db.collection("plans").document(plan_id).get()
+                                        if plan_doc.exists:
+                                            allowed = (plan_doc.to_dict() or {}).get("allowedServiceIds", [])
+                                            if "*" in allowed or "all" in allowed or SERVICE_ID in allowed:
+                                                has_active_sub = True
+                                                break
+                        except Exception:
+                            pass
+
+                        if has_active_sub:
+                            is_authorized = True
+                            try:
+                                override_snap.reference.delete()
+                            except Exception:
+                                pass
+                        else:
+                            raise HTTPException(
+                                status_code=403,
+                                detail={
+                                    "success": False,
+                                    "error": "service_access_revoked",
+                                    "message": f"Access to '{SERVICE_ID}' has been revoked by an administrator.",
+                                },
+                            )
                     if granted is True:
                         is_authorized = True
             except HTTPException:
